@@ -1,205 +1,211 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import api from '../../api/axios'; // اینستنس اکسیس شما
 import { 
-  FaPaperPlane, 
-  FaPaperclip, 
-  FaMicrophone, 
-  FaUserMd, 
-  FaCircle, 
-  FaFileMedicalAlt, 
-  FaImage 
+  FaPaperPlane, FaPaperclip, FaMicrophone, FaUserMd, 
+  FaCircle, FaFileMedicalAlt, FaSearch, FaSync
 } from 'react-icons/fa';
 
 const Consult = () => {
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sendLoading, setSendLoading] = useState(false);
+  const [conversations, setConversations] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
+  const messagesEndRef = useRef(null);
 
-  // داده‌های ساختگی چت (شبیه‌سازی مکالمه با دکتر)
-  const [chats, setChats] = useState([
-    { 
-      id: 1, 
-      sender: 'doctor', 
-      text: 'سلام علی جان. وقت بخیر. نتیجه MRI که فرستادی رو دیدم. خوشبختانه مشکل دیسک جدی نیست.', 
-      time: '14:30',
-      type: 'text'
-    },
-    { 
-      id: 2, 
-      sender: 'doctor', 
-      text: 'برات چند تا حرکت اصلاحی نوشتم که باید روزی ۲ بار انجام بدی. فایلش رو پایین می‌فرستم.', 
-      time: '14:32',
-      type: 'text'
-    },
-    { 
-      id: 3, 
-      sender: 'doctor', 
-      text: 'برنامه_تمرینی_کمر.pdf', 
-      time: '14:32',
-      type: 'file'
-    },
-    { 
-      id: 4, 
-      sender: 'patient', 
-      text: 'سلام دکتر، خیلی ممنون. چشم حتما انجام میدم. آیا نیازی هست داروی خاصی مصرف کنم؟', 
-      time: '14:45',
-      type: 'text'
-    },
-    { 
-      id: 5, 
-      sender: 'doctor', 
-      text: 'فعلاً فقط مسکن ساده در صورت درد شدید. هفته آینده دوباره وضعیتت رو چک می‌کنیم.', 
-      time: '15:10',
-      type: 'text'
-    },
-  ]);
-
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (!message.trim()) return;
-
-    // اضافه کردن پیام جدید به لیست
-    const newMsg = {
-      id: Date.now(),
-      sender: 'patient',
-      text: message,
-      time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-      type: 'text'
-    };
-    
-    setChats([...chats, newMsg]);
-    setMessage('');
+  // تابع اسکرول خودکار به پایین‌ترین پیام
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  return (
-    <div className="max-w-5xl mx-auto h-[calc(100vh-140px)] animate-fade-in flex flex-col md:flex-row gap-6">
+  // ۱. دریافت لیست گفتگوهای فعال بیمار (GET)
+  useEffect(() => {
+    const fetchConversations = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get('/patient/chats');
+        setConversations(response.data);
+        if (response.data.length > 0) setActiveChatId(response.data[0].id);
+        setLoading(false);
+      } catch (err) {
+        console.error("Fetch Conversations Error:", err);
+        setLoading(false);
+      }
+    };
+    fetchConversations();
+  }, []);
+
+  // ۲. دریافت پیام‌های چت انتخاب شده (GET)
+  useEffect(() => {
+    if (!activeChatId) return;
+    const fetchMessages = async () => {
+      try {
+        const response = await api.get(`/patient/chats/${activeChatId}/messages`);
+        setMessages(response.data);
+        setTimeout(scrollToBottom, 100);
+      } catch (err) {
+        console.error("Fetch Messages Error:", err);
+      }
+    };
+    fetchMessages();
+  }, [activeChatId]);
+
+  // ۳. ارسال پیام جدید به سرور (POST)
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!message.trim() || sendLoading) return;
+
+    try {
+      setSendLoading(true);
+      const payload = {
+        text: message,
+        type: 'text'
+      };
+
+      const response = await api.post(`/patient/chats/${activeChatId}/send`, payload);
       
-      {/* سایدبار لیست پزشکان (در موبایل مخفی می‌شود) */}
-      <div className="hidden md:flex flex-col w-1/3 glass-panel rounded-3xl p-4 border border-white/60 h-full">
-        <div className="mb-4 relative">
+      // اضافه کردن پیام تایید شده سرور به لیست
+      setMessages((prev) => [...prev, response.data]);
+      setMessage('');
+      setSendLoading(false);
+      setTimeout(scrollToBottom, 50);
+    } catch (err) {
+      alert("خطا در ارسال پیام. لطفا دوباره تلاش کنید.");
+      setSendLoading(false);
+    }
+  };
+
+  const currentChat = conversations.find(c => c.id === activeChatId);
+
+  return (
+    <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] animate-fade-in flex flex-col md:flex-row gap-6 p-2 bg-[#FDFBF7]">
+      
+      {/* سایدبار لیست پزشکان/گفتگوها */}
+      <div className="hidden md:flex flex-col w-1/3 bg-white rounded-[32px] p-6 border border-gray-100 shadow-sm h-full overflow-hidden">
+        <div className="mb-6 relative">
           <input 
             type="text" 
-            placeholder="جستجو در گفتگوها..." 
-            className="w-full bg-white/50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-trust-green transition-all"
+            placeholder="Search conversations..." 
+            className="w-full bg-gray-50 border-none rounded-2xl py-4 pr-12 pl-4 text-xs focus:ring-2 focus:ring-trust-green/10 outline-none font-black italic"
           />
+          <FaSearch className="absolute right-5 top-5 text-gray-300" />
         </div>
         
-        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-          {/* آیتم فعال */}
-          <div className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm border-r-4 border-trust-green cursor-pointer">
-            <div className="relative">
-              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center border-2 border-white shadow-sm overflow-hidden">
-                <img src="https://ui-avatars.com/api/?name=Dr+Naseh&background=E3F2FD&color=047857" alt="دکتر" />
+        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-300 gap-4">
+               <FaSync className="animate-spin text-xl" />
+               <span className="text-[10px] font-black uppercase italic">Updating Inbox...</span>
+            </div>
+          ) : (
+            conversations.map((chat) => (
+              <div 
+                key={chat.id}
+                onClick={() => setActiveChatId(chat.id)}
+                className={`flex items-center gap-4 p-5 cursor-pointer transition-all rounded-[28px] border-2 ${activeChatId === chat.id ? 'bg-green-50 border-trust-green/20' : 'bg-white border-transparent hover:bg-gray-50'}`}
+              >
+                <div className="relative shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center border-2 border-white shadow-sm overflow-hidden">
+                    {chat.avatar ? <img src={chat.avatar} alt="" /> : <FaUserMd className="text-gray-300 text-xl" />}
+                  </div>
+                  {chat.online && <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="font-black text-gray-800 text-sm truncate italic">{chat.name}</h4>
+                    <span className="text-[9px] text-gray-400 font-black font-mono">{chat.time}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 truncate font-bold italic">{chat.lastMsg}</p>
+                </div>
               </div>
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-center mb-1">
-                <h4 className="font-bold text-gray-800 text-sm truncate">دکتر ناصح یوسفی</h4>
-                <span className="text-xs text-trust-green font-bold">۱۵:۱۰</span>
-              </div>
-              <p className="text-xs text-gray-500 truncate">فعلاً فقط مسکن ساده...</p>
-            </div>
-          </div>
-
-          {/* آیتم غیر فعال */}
-          <div className="flex items-center gap-3 p-3 hover:bg-white/40 rounded-xl transition-colors cursor-pointer opacity-70">
-            <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center border-2 border-white">
-              <FaUserMd className="text-pastel-gold" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-center mb-1">
-                <h4 className="font-bold text-gray-700 text-sm">پشتیبانی فنی</h4>
-                <span className="text-xs text-gray-400">دیروز</span>
-              </div>
-              <p className="text-xs text-gray-400 truncate">مشکل پرداخت حل شد.</p>
-            </div>
-          </div>
+            ))
+          )}
         </div>
       </div>
 
-      {/* پنجره چت اصلی */}
-      <div className="flex-1 glass-panel rounded-3xl border border-white/60 flex flex-col h-full overflow-hidden relative">
+      {/* پنجره اصلی گفتگو */}
+      <div className="flex-1 bg-white rounded-[45px] border border-gray-100 flex flex-col h-full overflow-hidden relative shadow-sm">
         
         {/* هدر چت */}
-        <div className="p-4 bg-white/40 backdrop-blur-md border-b border-white/50 flex justify-between items-center z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-trust-green">
-              <img src="https://ui-avatars.com/api/?name=Dr+Naseh&background=E3F2FD&color=047857" alt="دکتر" />
+        {currentChat ? (
+          <div className="p-6 bg-white/80 backdrop-blur-md border-b border-gray-50 flex justify-between items-center z-10 px-10">
+            <div className="flex items-center gap-5">
+              <div className="w-12 h-12 rounded-[18px] overflow-hidden border-2 border-trust-green shadow-xl shadow-green-100">
+                {currentChat.avatar ? <img src={currentChat.avatar} alt="" /> : <FaUserMd className="text-gray-300" />}
+              </div>
+              <div>
+                <h3 className="font-black text-gray-800 flex items-center gap-3 italic">
+                  {currentChat.name}
+                  {currentChat.online && <FaCircle className="text-[8px] text-green-500 animate-pulse" />}
+                </h3>
+                <p className="text-[9px] text-trust-green font-black uppercase tracking-[0.2em] italic">Fast Response Active</p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                دکتر ناصح یوسفی
-                <FaCircle className="text-[10px] text-green-500 animate-pulse" />
-              </h3>
-              <p className="text-xs text-trust-green font-bold">آنلاین - پاسخگویی سریع</p>
-            </div>
+            <button className="text-gray-300 hover:text-gray-600 transition-all p-2 bg-gray-50 rounded-xl active:scale-90">
+                <FaSync size={14} onClick={() => setActiveChatId(activeChatId)} className={loading ? 'animate-spin' : ''} />
+            </button>
           </div>
-          <button className="text-gray-400 hover:text-gray-600 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-            </svg>
-          </button>
-        </div>
+        ) : (
+          <div className="p-6 border-b border-gray-50 italic text-gray-300 text-center font-black uppercase text-[10px]">Select a contact to begin</div>
+        )}
 
         {/* ناحیه پیام‌ها */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-white/30">
-          {chats.map((chat) => (
+        <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar bg-gray-50/20">
+          {messages.map((chat) => (
             <div key={chat.id} className={`flex ${chat.sender === 'patient' ? 'justify-end' : 'justify-start'}`}>
               <div 
                 className={`
-                  max-w-[75%] p-4 rounded-2xl relative shadow-sm text-sm leading-relaxed
+                  max-w-[70%] p-6 rounded-[32px] relative shadow-sm text-sm leading-[1.8] font-bold italic
                   ${chat.sender === 'patient' 
-                    ? 'bg-white text-gray-700 rounded-tr-none border border-white' 
-                    : 'bg-trust-green text-white rounded-tl-none shadow-md shadow-trust-green/20'
+                    ? 'bg-white text-gray-700 rounded-tr-none border border-gray-100' 
+                    : 'bg-trust-green text-white rounded-tl-none shadow-2xl shadow-green-200'
                   }
                 `}
               >
-                {/* اگر فایل باشد */}
                 {chat.type === 'file' ? (
-                  <div className="flex items-center gap-3 bg-white/20 p-2 rounded-lg cursor-pointer hover:bg-white/30 transition-colors">
-                    <div className="bg-white/20 p-2 rounded-lg">
-                      <FaFileMedicalAlt className="text-xl" />
-                    </div>
-                    <div>
-                      <span className="block font-bold ltr truncate text-xs">{chat.text}</span>
-                      <span className="text-[10px] opacity-80">2.4 MB</span>
+                  <div className="flex items-center gap-5 bg-white/10 p-4 rounded-2xl cursor-pointer hover:bg-white/20 transition-all border border-white/20">
+                    <FaFileMedicalAlt className="text-3xl" />
+                    <div className="text-right">
+                      <span className="block font-black ltr truncate text-xs font-mono">{chat.text}</span>
+                      <span className="text-[9px] opacity-70 uppercase font-black">2.4 MB • medical file</span>
                     </div>
                   </div>
                 ) : (
                   <p>{chat.text}</p>
                 )}
                 
-                <span className={`text-[10px] absolute bottom-1 ${chat.sender === 'patient' ? 'left-2 text-gray-400' : 'right-2 text-green-100 opacity-70'}`}>
-                  {chat.time}
-                </span>
+                <div className={`text-[9px] mt-4 font-mono font-black flex ${chat.sender === 'patient' ? 'justify-start text-gray-300' : 'justify-end text-green-50/60 uppercase'}`}>
+                   {chat.time}
+                </div>
               </div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* ناحیه تایپ و ارسال */}
-        <div className="p-4 bg-white/60 backdrop-blur-md border-t border-white/50">
-          <form onSubmit={handleSend} className="flex items-center gap-2 bg-white rounded-2xl p-2 shadow-sm border border-gray-200">
-            
-            <button type="button" className="p-3 text-gray-400 hover:text-trust-green hover:bg-green-50 rounded-xl transition-all">
-              <FaPaperclip />
+        <div className="p-8 bg-white border-t border-gray-50">
+          <form onSubmit={handleSend} className="flex items-center gap-4 bg-gray-50 rounded-[30px] p-2 pl-5 border border-transparent focus-within:border-trust-green/20 focus-within:bg-white transition-all shadow-inner">
+            <button type="button" className="p-4 text-gray-300 hover:text-trust-green transition-all active:scale-90">
+              <FaPaperclip size={20} />
             </button>
             
             <input 
               type="text" 
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="پیام خود را بنویسید..." 
-              className="flex-1 bg-transparent border-none focus:ring-0 text-gray-700 placeholder-gray-400 px-2"
+              placeholder="Describe your health status or ask a question..." 
+              className="flex-1 bg-transparent border-none focus:ring-0 text-gray-700 font-bold placeholder-gray-300 text-sm italic"
             />
             
-            {message.trim() ? (
-              <button type="submit" className="p-3 bg-trust-green text-white rounded-xl shadow-lg hover:scale-105 transition-all">
-                <FaPaperPlane className="rtl:-rotate-90" /> {/* چرخش آیکون ارسال برای راست‌چین */}
-              </button>
-            ) : (
-              <button type="button" className="p-3 text-gray-400 hover:text-gray-600 transition-all">
-                <FaMicrophone />
-              </button>
-            )}
+            <button 
+              type="submit" 
+              disabled={!message.trim() || sendLoading}
+              className={`p-5 rounded-2xl shadow-2xl transition-all flex items-center justify-center active:scale-95 ${message.trim() ? 'bg-trust-green text-white shadow-green-100 hover:bg-emerald-700' : 'bg-gray-100 text-gray-300'}`}
+            >
+              {sendLoading ? <FaSync className="animate-spin" /> : <FaPaperPlane className="rtl:-rotate-90 text-sm" />}
+            </button>
           </form>
         </div>
 
